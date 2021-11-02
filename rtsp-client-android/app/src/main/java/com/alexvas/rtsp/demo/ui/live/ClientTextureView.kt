@@ -12,12 +12,14 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.TextureView
 import com.alexvas.rtsp.RtspClient
+import com.alexvas.rtsp.demo.RtspActivity
 import com.alexvas.rtsp.demo.decode.FrameQueue
 import com.alexvas.rtsp.demo.decode.VideoDecodeThread
 import com.alexvas.utils.NetUtils
 import com.alexvas.utils.VideoCodecUtils
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
+import com.alexvas.rtsp.demo.RtspActivity.Companion.endpoint
 
 private const val DEFAULT_RTSP_PORT = 1935
 private val TAG: String = ClientTextureView::class.java.simpleName
@@ -154,7 +156,7 @@ class ClientTextureView(context: Context, attrs: AttributeSet?) : TextureView(co
                 }
             }
             val DEFAULT_RTSP_REQUEST = "rtsp://10.100.6.9:1935/" //"rtsp://192.168.176.220:1935/" //"rtsp://10.100.6.1:1935/" //
-            val uri: Uri = Uri.parse(DEFAULT_RTSP_REQUEST)
+            val uri: Uri = Uri.parse(RtspActivity.endpoint)
             val port = if (uri.port == -1) DEFAULT_RTSP_PORT else uri.port
             try {
                 if (DEBUG) Log.d(TAG, "Connecting to ${uri.host.toString()}:$port...")

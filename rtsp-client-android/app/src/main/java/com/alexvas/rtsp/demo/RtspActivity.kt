@@ -21,6 +21,10 @@ class RtspActivity : Activity() {
         //去除状态栏
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        endpoint = intent.getStringExtra("endpoint")
         setContentView(R.layout.activity_rtsp)
+    }
+    companion object {
+        var endpoint: String? = "rtsp://10.100.6.9:1935/"
     }
 }
