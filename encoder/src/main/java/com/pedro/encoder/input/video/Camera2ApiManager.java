@@ -31,10 +31,15 @@ import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.Face;
 import android.hardware.camera2.params.MeteringRectangle;
+import android.hardware.camera2.params.OutputConfiguration;
+import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerExecutor;
 import android.os.HandlerThread;
+import android.os.Looper;
+import android.os.Message;
 import android.util.Log;
 import android.util.Range;
 import android.util.Size;
@@ -46,9 +51,13 @@ import android.view.TextureView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
+
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Semaphore;
 
 import static android.hardware.camera2.CameraMetadata.LENS_FACING_FRONT;
@@ -139,7 +148,105 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
     return prepared;
   }
 
+  private static final int STREAM_CONFIG_MODE_VIDHANCE_EIS = 0x8001;
+  private static final int SESSION_REGULAR = 0;
+
+  private class MyCameraHandler extends Handler {
+
+    public MyCameraHandler(Looper looper) {
+      super(looper);
+    }
+
+    @Override
+    public void handleMessage(Message msg) {
+      int id = msg.arg1;
+//      switch (msg.what) {
+//        case OPEN_CAMERA:
+//          openCamera(id);
+//          break;
+//        case CANCEL_TOUCH_FOCUS:
+//          cancelTouchFocus(id);
+//          break;
+//      }
+    }
+  }
+  private static final int STREAM_CONFIG_MODE_UHD_SELE = (0x1 << 1);
+  @RequiresApi(api = Build.VERSION_CODES.P)
   private void startPreview(CameraDevice cameraDevice) {
+    try {
+      final List<Surface> listSurfaces = new ArrayList<>();
+      Surface preview = addPreviewSurface();
+      if (preview != null) listSurfaces.add(preview);
+      if (surfaceEncoder != preview && surfaceEncoder != null) listSurfaces.add(surfaceEncoder);
+
+      List<OutputConfiguration> outConfigurations = new ArrayList<>(listSurfaces.size());
+      for (Surface surface : listSurfaces) {
+        outConfigurations.add(new OutputConfiguration(surface));
+      }
+      CameraCaptureSession.StateCallback scb = new CameraCaptureSession.StateCallback() {
+        @Override
+        public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
+          Camera2ApiManager.this.cameraCaptureSession = cameraCaptureSession;
+          try {
+            CaptureRequest captureRequest = drawSurface(listSurfaces);
+            if (captureRequest != null) {
+              cameraCaptureSession.setRepeatingRequest(captureRequest,
+                      faceDetectionEnabled ? cb : null, cameraHandler);
+              Log.i(TAG, "Camera configured");
+            } else {
+              Log.e(TAG, "Error, captureRequest is null");
+            }
+          } catch (CameraAccessException | NullPointerException e) {
+            Log.e(TAG, "Error", e);
+          } catch (IllegalStateException e) {
+            reOpenCamera(cameraId != -1 ? cameraId : 0);
+          }
+        }
+
+        @Override
+        public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
+          cameraCaptureSession.close();
+          if (cameraCallbacks != null) cameraCallbacks.onCameraError("Configuration failed");
+          Log.e(TAG, "Configuration failed");
+        }
+      };
+
+      int mStreamConfigOptMode = 0;
+      mStreamConfigOptMode = mStreamConfigOptMode | STREAM_CONFIG_MODE_VIDHANCE_EIS |STREAM_CONFIG_MODE_UHD_SELE;
+      Executor executor = new ScheduledThreadPoolExecutor(2);
+//      @SuppressLint("WrongConstant")
+//      SessionConfiguration sc = new SessionConfiguration(SESSION_REGULAR | mStreamConfigOptMode,
+//              outConfigurations, new HandlerExecutor(cameraHandler), scb);
+
+      Object sessionConfig = null;
+      Method method_createCaptureSession = null;
+      try {
+        Class clazz = Class.forName("android.hardware.camera2.params.SessionConfiguration");
+        sessionConfig = clazz.getConstructors()[0].newInstance(
+                mStreamConfigOptMode, outConfigurations,
+                executor, scb);
+
+        method_createCaptureSession = CameraDevice.class.getDeclaredMethod(
+                "createCaptureSession", clazz);
+        method_createCaptureSession.invoke(cameraDevice, sessionConfig);
+      } catch (Exception exception) {
+        Log.w(TAG, "createCameraSessionWithSessionConfiguration method is not exist");
+        exception.printStackTrace();
+      }
+
+//      cameraDevice.createCaptureSession(sc);
+//      cameraDevice.createCaptureSession(listSurfaces, scb, cameraHandler);
+    } catch (IllegalArgumentException e) {
+      if (cameraCallbacks != null) {
+        cameraCallbacks.onCameraError("Create capture session failed: " + e.getMessage());
+      }
+      Log.e(TAG, "Error", e);
+    } catch (IllegalStateException e) {
+      reOpenCamera(cameraId != -1 ? cameraId : 0);
+    }
+  }
+
+  private void startPreviewNoEis(CameraDevice cameraDevice) {
     try {
       final List<Surface> listSurfaces = new ArrayList<>();
       Surface preview = addPreviewSurface();
@@ -154,7 +261,7 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
             CaptureRequest captureRequest = drawSurface(listSurfaces);
             if (captureRequest != null) {
               cameraCaptureSession.setRepeatingRequest(captureRequest,
-                  faceDetectionEnabled ? cb : null, cameraHandler);
+                      faceDetectionEnabled ? cb : null, cameraHandler);
               Log.i(TAG, "Camera configured");
             } else {
               Log.e(TAG, "Error, captureRequest is null");
@@ -862,6 +969,7 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
     running = false;
   }
 
+  @RequiresApi(api = Build.VERSION_CODES.P)
   @Override
   public void onOpened(@NonNull CameraDevice cameraDevice) {
     this.cameraDevice = cameraDevice;
